@@ -1,0 +1,15 @@
+/* Icon-only Copy button, sized to sit cleanly next to GitHub's existing
+   header buttons. */
+#gh-pr-md-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  padding: 6px;
+  line-height: 0;
+  cursor: pointer;
+}
+
+#gh-pr-md-copy-btn svg {
+  display: block;
+}
