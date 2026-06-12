@@ -27,6 +27,44 @@ function getTitle() {
   return text || null;
 }
 
+// Returns { additions, deletions } from the PR header diffstat (e.g.
+// { additions: 132, deletions: 2531 }). Either field is null when not found.
+function getDiffStat() {
+  // Prefer the screen-reader summary ("Lines changed: 132 additions & 2531
+  // deletions"), which carries the unabbreviated numbers and is the most
+  // stable across GitHub's markup revisions.
+  for (const el of document.querySelectorAll(".sr-only")) {
+    const text = el.textContent;
+    const add = text.match(/([\d,]+)\s+additions?/i);
+    const del = text.match(/([\d,]+)\s+deletions?/i);
+    if (add || del) {
+      return {
+        additions: add ? parseInt(add[1].replace(/,/g, ""), 10) : null,
+        deletions: del ? parseInt(del[1].replace(/,/g, ""), 10) : null,
+      };
+    }
+  }
+  // Fall back to the colored "+N"/"-N" spans (new fgColor-* classes, older
+  // color-fg-* / text-green / text-red names).
+  const parse = (el) => {
+    if (!el) return null;
+    const m = el.textContent.replace(/,/g, "").match(/\d+/);
+    return m ? parseInt(m[0], 10) : null;
+  };
+  return {
+    additions: parse(
+      document.querySelector(".fgColor-success") ||
+        document.querySelector("#diffstat .color-fg-success") ||
+        document.querySelector("#diffstat .text-green")
+    ),
+    deletions: parse(
+      document.querySelector(".fgColor-danger") ||
+        document.querySelector("#diffstat .color-fg-danger") ||
+        document.querySelector("#diffstat .text-red")
+    ),
+  };
+}
+
 // Escapes a string for safe interpolation into HTML attribute/text contexts.
 function escapeHtml(s) {
   return s
@@ -41,9 +79,19 @@ function escapeHtml(s) {
 // Slack desktop app — pick up the HTML flavor and render a real hyperlink;
 // everything else falls back to the markdown. Falls back to execCommand with
 // a copy event listener when the async ClipboardItem API is unavailable.
-async function copyLink(title, url) {
-  const html = `<a href="${escapeHtml(url)}">${escapeHtml(title)}</a>`;
-  const markdown = `[${title}](${url})`;
+async function copyLink(title, url, stat) {
+  // Build the diffstat suffix, e.g. "(+256 / -2,531)". Each side is included
+  // only when non-zero, so a deletions-only PR reads "(-2,531)" and a PR with
+  // no line changes gets no suffix at all. Rendered italic, after the link.
+  const fmt = (n) => n.toLocaleString("en-US");
+  const parts = [];
+  if (stat && stat.additions) parts.push(`+${fmt(stat.additions)}`);
+  if (stat && stat.deletions) parts.push(`-${fmt(stat.deletions)}`);
+  const diff = parts.join(" / ");
+  const htmlSuffix = diff ? ` <i>(${diff})</i>` : "";
+  const mdSuffix = diff ? ` _(${diff})_` : "";
+  const html = `<a href="${escapeHtml(url)}">${escapeHtml(title)}</a>${htmlSuffix}`;
+  const markdown = `[${title}](${url})${mdSuffix}`;
 
   try {
     await navigator.clipboard.write([
@@ -79,7 +127,8 @@ async function onClick(e) {
     flash(btn, "No title found");
     return;
   }
-  const ok = await copyLink(title, getCanonicalUrl());
+  // Append the diffstat (italic) when available, e.g. "Add endpoint (+243 / -12)".
+  const ok = await copyLink(title, getCanonicalUrl(), getDiffStat());
   flash(btn, ok);
 }
 
