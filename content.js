@@ -164,8 +164,8 @@ function injectButton() {
   btn.type = "button";
   btn.className = "btn btn-sm";
   btn.innerHTML = COPY_ICON;
-  btn.setAttribute("aria-label", "Copy PR title and URL as a markdown link");
-  btn.dataset.label = "Copy PR title and URL as a markdown link";
+  btn.setAttribute("aria-label", "Copy PR as a share-ready link");
+  btn.dataset.label = "Copy PR as a share-ready link";
   btn.title = btn.dataset.label;
   btn.addEventListener("click", onClick);
 

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "GitHub PR Link",
+  "name": "PullShare",
   "version": "1.0.0",
-  "description": "Adds a button on GitHub PR pages to copy the PR title and URL as a link.",
+  "description": "One click turns any GitHub PR into a clean, share-ready link.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
