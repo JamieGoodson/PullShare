@@ -315,7 +315,7 @@ function buildPrompt(thread) {
   const code = getThreadCode(thread);
   const title = getTitle();
 
-  const lines = ["Please address this GitHub PR review comment.", ""];
+  const lines = ["Please address this GitHub PR review comment. Do not reply to the comment thread.", ""];
   if (title) lines.push(`PR: ${title}`);
   lines.push(`Link: ${comments[0].url || getPrUrl()}`);
   if (path) lines.push(`File: ${path}`);
