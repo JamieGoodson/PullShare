@@ -1,7 +1,6 @@
 // Injects a "Copy MD" button into the GitHub PR header that copies the PR
-// title and URL to the clipboard as an HTML link (<a href="url">title</a>),
-// with a markdown link as the plain-text fallback. Slack's desktop app reads
-// the text/html flavor on paste and renders it as a proper hyperlink.
+// title and URL to the clipboard as plain text, in the form
+// "<PR title>: <PR URL>".
 
 const BUTTON_ID = "gh-pr-md-copy-btn";
 const PROMPT_BUTTON_CLASS = "gh-pr-prompt-copy-btn";
@@ -93,58 +92,18 @@ function getDiffStat() {
   };
 }
 
-// Escapes a string for safe interpolation into HTML attribute/text contexts.
-function escapeHtml(s) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-// Copies a link to the clipboard as both text/html (an anchor tag) and
-// text/plain (a markdown link). Apps that understand rich text — like the
-// Slack desktop app — pick up the HTML flavor and render a real hyperlink;
-// everything else falls back to the markdown. Falls back to execCommand with
-// a copy event listener when the async ClipboardItem API is unavailable.
-async function copyLink(title, url, stat) {
-  // Build the diffstat suffix, e.g. "(+256 / -2,531)". Each side is included
-  // only when non-zero, so a deletions-only PR reads "(-2,531)" and a PR with
-  // no line changes gets no suffix at all. Rendered italic, after the link.
+// Builds the text put on the clipboard: "<title>: <url>", with the diffstat
+// appended when available, e.g. "Add endpoint: https://... (+243 / -12)".
+// Each side of the diffstat is included only when non-zero, so a
+// deletions-only PR reads "(-2,531)" and a PR with no line changes gets no
+// suffix at all.
+function formatLink(title, url, stat) {
   const fmt = (n) => n.toLocaleString("en-US");
   const parts = [];
   if (stat && stat.additions) parts.push(`+${fmt(stat.additions)}`);
   if (stat && stat.deletions) parts.push(`-${fmt(stat.deletions)}`);
   const diff = parts.join(" / ");
-  const htmlSuffix = diff ? ` <i>(${diff})</i>` : "";
-  const mdSuffix = diff ? ` _(${diff})_` : "";
-  const html = `<a href="${escapeHtml(url)}">${escapeHtml(title)}</a>${htmlSuffix}`;
-  const markdown = `[${title}](${url})${mdSuffix}`;
-
-  try {
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        "text/html": new Blob([html], { type: "text/html" }),
-        "text/plain": new Blob([markdown], { type: "text/plain" }),
-      }),
-    ]);
-    return true;
-  } catch (e) {
-    const onCopy = (ev) => {
-      ev.clipboardData.setData("text/html", html);
-      ev.clipboardData.setData("text/plain", markdown);
-      ev.preventDefault();
-    };
-    document.addEventListener("copy", onCopy);
-    let ok = false;
-    try {
-      ok = document.execCommand("copy");
-    } catch (_) {
-      ok = false;
-    }
-    document.removeEventListener("copy", onCopy);
-    return ok;
-  }
+  return `${title}: ${url}${diff ? ` (${diff})` : ""}`;
 }
 
 async function onClick(e) {
@@ -155,11 +114,10 @@ async function onClick(e) {
     flash(btn, "No title found");
     return;
   }
-  // Append the diffstat (italic) when available and enabled in settings,
-  // e.g. "Add endpoint (+243 / -12)".
+  // Append the diffstat when available and enabled in settings.
   const { showLineCounts } = await getSettings();
   const stat = showLineCounts ? getDiffStat() : null;
-  const ok = await copyLink(title, getCanonicalUrl(), stat);
+  const ok = await copyText(formatLink(title, getCanonicalUrl(), stat));
   flash(btn, ok);
 }
 

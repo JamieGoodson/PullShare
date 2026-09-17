@@ -1,8 +1,12 @@
 # PullShare
 
-With the PullShare Chrome extension, one click turns any GitHub PR into a clean, shareable link.
+With the PullShare Chrome extension, one click copies any GitHub PR as its title and URL, ready to share.
 
-**Example:** [Update frontend-design skill](https://github.com/anthropics/skills/pull/1293) _(+39 / -26)_
+**Example:**
+
+```
+Update frontend-design skill: https://github.com/anthropics/skills/pull/1293 (+39 / -26)
+```
 
 It also adds a **Copy as prompt** button to every review comment thread, which copies the comment, the file path and the code lines it's anchored to — ready to paste into Claude:
 
