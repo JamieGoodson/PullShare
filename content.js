@@ -7,8 +7,13 @@ const PROMPT_BUTTON_CLASS = "gh-pr-prompt-copy-btn";
 
 // Setting keys and their defaults, shared with the options page.
 // `showLineCounts` controls whether the diffstat suffix (e.g. "(+256 / -2,531)")
-// is appended; `showCopyAsPrompt` controls the per-review-thread button.
-const SETTINGS_DEFAULTS = { showLineCounts: true, showCopyAsPrompt: true };
+// is appended; `showCopyAsPrompt` controls the per-review-thread button;
+// `autoCollapseTests` collapses test files on the PR's changes tab.
+const SETTINGS_DEFAULTS = {
+  showLineCounts: true,
+  showCopyAsPrompt: true,
+  autoCollapseTests: true,
+};
 
 // Last known settings, kept in sync so the (synchronous) injection pass can
 // decide whether to add prompt buttons without awaiting storage each time.
@@ -431,6 +436,86 @@ function removePromptButtons() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Auto-collapse test files on the "Files changed" tab, so only the non-test
+// files are left open for review.
+// ---------------------------------------------------------------------------
+
+// Python: test_*.py, *_test.py, conftest.py, or anything under a tests/ or
+// test/ directory. TypeScript: *.test.ts(x) / *.spec.ts(x), or anything under
+// __tests__/.
+const TEST_FILE_PATTERNS = [
+  /(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$/,
+  /(^|\/)tests?\/.*\.py$/,
+  /\.(test|spec)\.[cm]?tsx?$/,
+  /(^|\/)__tests__\/.*\.[cm]?tsx?$/,
+];
+
+function isTestFile(path) {
+  return TEST_FILE_PATTERNS.some((re) => re.test(path));
+}
+
+// Files already handled, keyed by PR URL + path, so a test file the user
+// re-expands isn't collapsed again when GitHub re-renders its header.
+const handledFiles = new Set();
+
+function isChangesTab() {
+  return /\/pull\/\d+\/(changes|files)\b/.test(location.pathname);
+}
+
+// The file path from a (React) diff file header. The "Expand all lines"
+// button carries it as an attribute; otherwise fall back to the heading's
+// screen-reader text, taking the new path for renames.
+function getHeaderPath(header) {
+  const el = header.querySelector("[data-file-path]");
+  if (el) return el.getAttribute("data-file-path");
+  const sr = header.querySelector("h3 .sr-only");
+  const text = sr && sr.textContent.trim();
+  return text ? text.split(" renamed to ").pop().trim() : null;
+}
+
+// The header's collapse toggle, or null when the file is already collapsed.
+// The toggle is labelled by a tooltip that reads "Collapse file" or "Expand
+// file" depending on the current state.
+function getCollapseButton(header) {
+  for (const btn of header.querySelectorAll("button[aria-labelledby]")) {
+    const tip = document.getElementById(btn.getAttribute("aria-labelledby"));
+    if (tip && tip.textContent.trim() === "Collapse file") return btn;
+  }
+  return null;
+}
+
+function collapseTestFiles() {
+  if (!settingsLoaded || !settings.autoCollapseTests || !isChangesTab()) return;
+  const pr = getPrUrl();
+
+  // New React diff view.
+  for (const header of document.querySelectorAll(
+    '[class*="DiffFileHeader-module__diff-file-header"]'
+  )) {
+    const path = getHeaderPath(header);
+    const key = pr + " " + path;
+    if (!path || handledFiles.has(key)) continue;
+    handledFiles.add(key);
+    if (!isTestFile(path)) continue;
+    const btn = getCollapseButton(header);
+    if (btn) btn.click();
+  }
+
+  // Legacy diff view.
+  for (const file of document.querySelectorAll(".file[data-tagsearch-path]")) {
+    const path = file.getAttribute("data-tagsearch-path");
+    const key = pr + " " + path;
+    if (handledFiles.has(key)) continue;
+    handledFiles.add(key);
+    if (!isTestFile(path)) continue;
+    const btn = file.querySelector(
+      '.file-header .js-details-target[aria-expanded="true"]'
+    );
+    if (btn) btn.click();
+  }
+}
+
 // Inserts the button into the PR header if it isn't already there.
 function injectButton() {
   if (document.getElementById(BUTTON_ID)) return;
@@ -464,7 +549,7 @@ function injectButton() {
   }
 }
 
-// Runs both injections. Debounced, because the MutationObserver below fires
+// Runs all injections. Debounced, because the MutationObserver below fires
 // often on a busy PR page (and once for our own insertions).
 let injectTimer = null;
 function inject() {
@@ -472,6 +557,7 @@ function inject() {
   injectTimer = setTimeout(() => {
     injectButton();
     injectPromptButtons();
+    collapseTestFiles();
   }, 50);
 }
 
@@ -482,7 +568,7 @@ inject();
 getSettings().then((loaded) => {
   settings = loaded;
   settingsLoaded = true;
-  if (settings.showCopyAsPrompt) inject();
+  if (settings.showCopyAsPrompt || settings.autoCollapseTests) inject();
 });
 
 document.addEventListener("pjax:end", inject);
@@ -499,8 +585,8 @@ try {
     for (const [key, { newValue }] of Object.entries(changes)) {
       settings[key] = newValue;
     }
-    if (settings.showCopyAsPrompt) inject();
-    else removePromptButtons();
+    if (!settings.showCopyAsPrompt) removePromptButtons();
+    inject();
   });
 } catch (_) {
   // Storage events unavailable; the settings read above still applies.

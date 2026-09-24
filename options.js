@@ -1,6 +1,10 @@
 // Persists options to chrome.storage.sync. Keep the defaults in sync with
 // SETTINGS_DEFAULTS in content.js.
-const SETTINGS_DEFAULTS = { showLineCounts: true, showCopyAsPrompt: true };
+const SETTINGS_DEFAULTS = {
+  showLineCounts: true,
+  showCopyAsPrompt: true,
+  autoCollapseTests: true,
+};
 
 const status = document.getElementById("status");
 

@@ -56,7 +56,7 @@
   </head>
   <body>
     <h1>PullShare</h1>
-    <p class="hint">Options for what PullShare copies.</p>
+    <p class="hint">PullShare options.</p>
 
     <label class="row">
       <input type="checkbox" id="showLineCounts" />
@@ -73,6 +73,17 @@
         <span
           >Add a button to each review thread that copies the comment, file path
           and code lines, ready to paste into Claude.</span
+        >
+      </span>
+    </label>
+
+    <label class="row">
+      <input type="checkbox" id="autoCollapseTests" />
+      <span class="row-text">
+        <strong>Auto-collapse test files</strong>
+        <span
+          >Collapse Python and TypeScript test files on a PR's changes tab, so
+          only the non-test files are left open.</span
         >
       </span>
     </label>

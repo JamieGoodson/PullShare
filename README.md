@@ -33,6 +33,8 @@ is there a mechanism to retry the PROCESSING conversations even when acking the 
 
 Replies in the thread are included too, along with any suggested changes.
 
+On a PR's **Files changed** tab, it auto-collapses Python and TypeScript test files (`test_*.py`, `*_test.py`, `conftest.py`, `tests/**/*.py`, `*.test.ts(x)`, `*.spec.ts(x)`, `__tests__/**`) so only the non-test files are left open for review.
+
 ## Install (unpacked, for development)
 
 1. Open `chrome://extensions` in Chrome.
@@ -46,5 +48,6 @@ Open the extension's options (right-click the toolbar icon → **Options**, or v
 
 - **Include line counts** — the diffstat, e.g. _(+243 / -12)_, in the copied link.
 - **“Copy as prompt” on review comments** — the per-thread button.
+- **Auto-collapse test files** — collapse test files on the changes tab.
 
-Both are on by default.
+All are on by default.
