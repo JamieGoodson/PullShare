@@ -49,10 +49,18 @@ function getCanonicalUrl() {
   return location.origin + location.pathname;
 }
 
+// GitHub prefixes file paths with an invisible left-to-right mark, which
+// String#trim doesn't strip.
+function cleanText(text) {
+  return text.replace(/[\u200e\u200f]/g, "").trim();
+}
+
 // Returns the PR title text, or null if it can't be found.
 function getTitle() {
-  // New React PageHeader markup; falls back to the legacy selector.
+  // Current React PageHeader (TitleArea), the earlier React markup
+  // (PH_Title), then the legacy selector.
   const el =
+    document.querySelector('[data-component="TitleArea"] .markdown-title') ||
     document.querySelector('[data-component="PH_Title"] .markdown-title') ||
     document.querySelector(".js-issue-title");
   const text = el && el.textContent.trim();
@@ -143,6 +151,11 @@ function flash(btn, ok) {
 // into Claude.
 // ---------------------------------------------------------------------------
 
+// A rendered comment: `.js-comment-body` in the legacy markup, the
+// `.markdown-body` inside a React `review-thread` otherwise.
+const COMMENT_BODY =
+  '.js-comment-body, [data-testid="review-thread"] .markdown-body';
+
 // The PR URL without any /files, /commits, … suffix, so thread permalinks
 // (#discussion_rNNN) resolve to the Conversation tab.
 function getPrUrl() {
@@ -155,12 +168,17 @@ function getPrUrl() {
 // file container.
 function getThreadPath(thread) {
   const link = thread.querySelector("a.text-mono");
-  if (link && link.textContent.trim()) return link.textContent.trim();
+  if (link && cleanText(link.textContent)) return cleanText(link.textContent);
 
   // Hidden inputs on the reply / suggestion forms.
   for (const input of thread.querySelectorAll('input[name="path"]')) {
     if (input.value) return input.value;
   }
+
+  // React Files tab: the file header of the enclosing diff.
+  const entry = thread.closest('[class*="diffEntry"]');
+  const header = entry && entry.querySelector(DIFF_FILE_HEADER);
+  if (header) return getHeaderPath(header);
 
   const file = thread.closest("[data-tagsearch-path], [data-path], .file");
   if (!file) return null;
@@ -183,6 +201,13 @@ function dedent(lines) {
   return lines.map((line) => line.slice(min));
 }
 
+// The code text of a diff row: `.blob-code-inner` in the legacy diff tables,
+// `.diff-text-inner` on the React Files tab and a hashed `diffTextInner__*`
+// class in the Conversation tab's thread previews.
+const DIFF_CODE =
+  '.blob-code-inner, .diff-text-inner, [class*="diffTextInner"]';
+const DIFF_MARKER = '.diff-text-marker, [class*="diffTextMarker"]';
+
 // Turns diff-table rows into { code, first, last }, or null if none of them
 // hold code. When the rows combine additions, deletions and/or context the +/-
 // prefixes are kept so the change stays legible; a single-sided hunk is copied
@@ -191,29 +216,43 @@ function dedent(lines) {
 function rowsToCode(rows) {
   const entries = [];
   for (const tr of rows) {
-    const cell = tr.querySelector(".blob-code-inner");
+    const cell = tr.querySelector(DIFF_CODE);
     if (!cell) continue;
 
-    // Newer markup puts the diff character in an attribute (rendered via CSS);
-    // older markup encodes it in a class.
-    const deletion = !!tr.querySelector(".blob-code-deletion");
+    // React markup renders the diff character in its own element; earlier
+    // markup puts it in an attribute (rendered via CSS) or encodes it in a
+    // class.
+    const markerEl = tr.querySelector(DIFF_MARKER);
     const marker =
       cell.getAttribute("data-code-marker") ||
-      (tr.querySelector(".blob-code-addition") ? "+" : deletion ? "-" : " ");
+      (markerEl && markerEl.textContent.trim()) ||
+      (tr.querySelector(".blob-code-addition")
+        ? "+"
+        : tr.querySelector(".blob-code-deletion")
+          ? "-"
+          : " ");
+    const deletion = marker === "-";
 
     let text = cell.textContent.replace(/\n+$/, "");
     if (cell.hasAttribute("data-code-marker") && text.startsWith(marker)) {
       text = text.slice(marker.length);
     }
 
-    const cells = [...tr.querySelectorAll("td[data-line-number]")];
+    // `:scope >` keeps a Files-tab row from picking up cells of a suggested
+    // change rendered inside the thread it holds. The Conversation tab's
+    // previews only carry the number as text.
+    const cells = [...tr.querySelectorAll(":scope > td[data-line-number]")];
     const numCell = cells[cells.length - 1] || null;
+    const textNumCell = tr.querySelector(':scope > td[class*="diffLineNumber"]');
+    const num = numCell
+      ? parseInt(numCell.getAttribute("data-line-number"), 10)
+      : textNumCell
+        ? parseInt(textNumCell.textContent, 10)
+        : null;
     entries.push({
       marker,
       text,
-      num: numCell
-        ? parseInt(numCell.getAttribute("data-line-number"), 10)
-        : null,
+      num,
       // A deleted line's number refers to the base revision, not the new file.
       isNew: !deletion,
     });
@@ -236,12 +275,14 @@ function rowsToCode(rows) {
 }
 
 // On the Files tab a thread lives in a row of the file's own diff table rather
-// than carrying its own copy of the hunk, so the commented line is the nearest
-// code row above it. Other comment rows in between are skipped; a hunk header
-// or the top of the table ends the search.
+// than carrying its own copy of the hunk. The React diff renders it inside the
+// commented line's own row; the legacy diff gives it a row of its own, so the
+// commented line is the nearest code row above it. Other comment rows in
+// between are skipped; a hunk header or the top of the table ends the search.
 function getEnclosingDiffCode(thread) {
   const row = thread.closest("tr");
   if (!row) return null;
+  if (row.querySelector(":scope > td.diff-text-cell")) return rowsToCode([row]);
   for (let prev = row.previousElementSibling; prev; prev = prev.previousElementSibling) {
     if (prev.querySelector(".blob-code-inner")) return rowsToCode([prev]);
     if (!prev.querySelector(".js-comment-body")) return null;
@@ -254,9 +295,13 @@ function getEnclosingDiffCode(thread) {
 // matches rows whose diff-table ancestor sits *outside* the thread, which is
 // exactly the case on the Files tab.
 function getThreadCode(thread) {
-  const own = [...thread.querySelectorAll(":scope table.diff-table tr")].filter(
+  const own = [
+    ...thread.querySelectorAll(
+      ':scope table.diff-table tr, :scope [class*="StaticDiffPreview"] tr'
+    ),
+  ].filter(
     // Suggested changes render their own diff rows inside the comment body.
-    (tr) => !tr.closest(".js-comment-body, .js-suggested-changes-blob")
+    (tr) => !tr.closest(COMMENT_BODY + ", .js-suggested-changes-blob")
   );
   return own.length ? rowsToCode(own) : getEnclosingDiffCode(thread);
 }
@@ -293,19 +338,36 @@ function commentToText(body) {
   return parts.filter(Boolean).join("\n\n");
 }
 
+// The comment's permalink as "#discussion_rNNN". The Files tab links to the
+// shorter "#rNNN" form, which only resolves there.
+function getCommentAnchor(container) {
+  for (const a of container.querySelectorAll('a[href*="#"]')) {
+    const m = a.href.split("#").pop().match(/^(?:discussion_)?r(\d+)$/);
+    if (m) return "#discussion_r" + m[1];
+  }
+  return null;
+}
+
 // Every comment in the thread, oldest first, as { author, text, url }.
 function getThreadComments(thread) {
   const comments = [];
-  for (const body of thread.querySelectorAll(".js-comment-body")) {
-    const container = body.closest(".js-comment") || thread;
-    const author = container.querySelector("a.author");
-    const permalink = container.querySelector('a[href*="#discussion_r"]');
+  for (const body of thread.querySelectorAll(COMMENT_BODY)) {
+    // React comments have no wrapper class of their own; the nearest ancestor
+    // holding a comment header is the one comment.
+    const container =
+      body.closest(".js-comment") ||
+      body.closest(':has([data-testid="comment-header"])') ||
+      thread;
+    const author = container.querySelector(
+      'a.author, a[data-testid="avatar-link"]'
+    );
+    const anchor = getCommentAnchor(container);
     const text = commentToText(body);
     if (!text) continue;
     comments.push({
       author: author ? author.textContent.trim() : null,
       text,
-      url: permalink ? getPrUrl() + "#" + permalink.href.split("#").pop() : null,
+      url: anchor ? getPrUrl() + anchor : null,
     });
   }
   return comments;
@@ -390,15 +452,21 @@ async function onPromptClick(e) {
 
 // Review threads, deduped: `review-thread-collapsible` also carries the
 // `js-resolvable-timeline-thread-container` class and wraps a `.js-line-comments`
-// block, so keep only the outermost match.
+// block, so keep only the outermost match. In the React markup a thread's
+// comments sit in a `review-thread` element; the thread itself (header, diff
+// preview, comments) is the enclosing <article> on the Conversation tab and the
+// comment box around it on the Files tab.
 function findReviewThreads() {
-  const candidates = [
-    ...document.querySelectorAll(
+  const candidates = new Set(
+    document.querySelectorAll(
       "review-thread-collapsible, .js-resolvable-timeline-thread-container, .js-line-comments"
-    ),
-  ];
-  return candidates.filter(
-    (el) => !candidates.some((other) => other !== el && other.contains(el))
+    )
+  );
+  for (const el of document.querySelectorAll('[data-testid="review-thread"]')) {
+    candidates.add(el.closest("article") || el.parentElement);
+  }
+  return [...candidates].filter(
+    (el) => ![...candidates].some((other) => other !== el && other.contains(el))
   );
 }
 
@@ -408,7 +476,7 @@ function injectPromptButtons() {
 
   for (const thread of findReviewThreads()) {
     if (thread.querySelector("." + PROMPT_BUTTON_CLASS)) continue;
-    if (!thread.querySelector(".js-comment-body")) continue; // No comments yet.
+    if (!thread.querySelector(COMMENT_BODY)) continue; // No comments yet.
 
     const btn = document.createElement("button");
     btn.type = "button";
@@ -418,11 +486,17 @@ function injectPromptButtons() {
     btn.addEventListener("click", onPromptClick);
     thread.setAttribute("data-pullshare-thread", "");
 
-    // Preferred home: the thread header, to the right of the file path.
+    // Preferred home: the thread header, to the right of the file path (or of
+    // the "Comment on line …" heading on the React Files tab).
     const pathLink = thread.querySelector("a.text-mono");
+    const heading = thread.querySelector(
+      '[class*="inlineReviewThreadHeading"]'
+    );
     const actions = thread.querySelector(".timeline-comment-actions");
     if (pathLink && pathLink.parentElement) {
       pathLink.parentElement.after(btn);
+    } else if (heading) {
+      heading.after(btn);
     } else if (actions) {
       actions.prepend(btn);
     }
@@ -463,15 +537,23 @@ function isChangesTab() {
   return /\/pull\/\d+\/(changes|files)\b/.test(location.pathname);
 }
 
+// A (React) diff file header. Its CSS-module class has been both
+// `DiffFileHeader-module__diff-file-header__*` and `diff-file-header__*`.
+const DIFF_FILE_HEADER = '[class*="diff-file-header"]';
+
 // The file path from a (React) diff file header. The "Expand all lines"
 // button carries it as an attribute; otherwise fall back to the heading's
-// screen-reader text, taking the new path for renames.
+// screen-reader text, taking the new path for renames, or the heading's
+// visible (last) path.
 function getHeaderPath(header) {
   const el = header.querySelector("[data-file-path]");
   if (el) return el.getAttribute("data-file-path");
   const sr = header.querySelector("h3 .sr-only");
   const text = sr && sr.textContent.trim();
-  return text ? text.split(" renamed to ").pop().trim() : null;
+  if (text) return text.split(" renamed to ").pop().trim();
+  const codes = header.querySelectorAll("h3 code");
+  const last = codes.length && cleanText(codes[codes.length - 1].textContent);
+  return last || null;
 }
 
 // The header's collapse toggle, or null when the file is already collapsed.
@@ -490,9 +572,7 @@ function collapseTestFiles() {
   const pr = getPrUrl();
 
   // New React diff view.
-  for (const header of document.querySelectorAll(
-    '[class*="DiffFileHeader-module__diff-file-header"]'
-  )) {
+  for (const header of document.querySelectorAll(DIFF_FILE_HEADER)) {
     const path = getHeaderPath(header);
     const key = pr + " " + path;
     if (!path || handledFiles.has(key)) continue;
@@ -527,6 +607,7 @@ function injectButton() {
     document.querySelector('[data-component="PH_Actions"]') ||
     document.querySelector(".gh-header-actions");
   const titleEl =
+    document.querySelector('[data-component="TitleArea"]') ||
     document.querySelector('[data-component="PH_Title"]') ||
     document.querySelector(".js-issue-title");
   if (!titleEl) return; // Not a PR page (or header not yet rendered).

@@ -10,10 +10,26 @@
   cursor: pointer;
 }
 
+/* The React page header already spaces its buttons with a flex gap. */
+[data-component="PH_Actions"] #gh-pr-md-copy-btn {
+  margin-right: 0;
+}
+
 #gh-pr-md-copy-btn svg {
   display: block;
 }
 
+.gh-pr-prompt-copy-btn {
+  padding: 4px 12px !important;
+  margin: 0 4px;
+}
+
 .gh-pr-prompt-copy-btn svg {
   display: block;
+}
+
+/* Files tab: the heading ("Comment on line R55") doesn't grow, so the button
+   would otherwise sit flush against it. */
+[class*="inlineReviewThreadHeading"] + .gh-pr-prompt-copy-btn {
+  margin-left: 8px;
 }
