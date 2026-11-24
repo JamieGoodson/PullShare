@@ -57,14 +57,23 @@ function cleanText(text) {
 
 // Returns the PR title text, or null if it can't be found.
 function getTitle() {
-  // Current React PageHeader (TitleArea), the earlier React markup
-  // (PH_Title), then the legacy selector.
+  // Current React PageHeader (TitleArea, with a hashed `markdownTitle__*`
+  // class), its earlier `.markdown-title` form, the older PH_Title markup,
+  // then the legacy selector.
   const el =
+    document.querySelector('[data-component="TitleArea"] [class*="markdownTitle"]') ||
     document.querySelector('[data-component="TitleArea"] .markdown-title') ||
     document.querySelector('[data-component="PH_Title"] .markdown-title') ||
     document.querySelector(".js-issue-title");
   const text = el && el.textContent.trim();
-  return text || null;
+  if (text) return text;
+
+  // Last resort: the header's <h1>, minus the screen-reader " - #123" suffix.
+  const h1 = document.querySelector('[data-component="TitleArea"] h1');
+  if (!h1) return null;
+  const clone = h1.cloneNode(true);
+  for (const sr of clone.querySelectorAll(".sr-only")) sr.remove();
+  return clone.textContent.trim() || null;
 }
 
 // Returns { additions, deletions } from the PR header diffstat (e.g.
@@ -124,7 +133,7 @@ async function onClick(e) {
   const btn = e.currentTarget;
   const title = getTitle();
   if (!title) {
-    flash(btn, "No title found");
+    flash(btn, false, "Couldn't find the PR title");
     return;
   }
   // Append the diffstat when available and enabled in settings.
@@ -136,8 +145,9 @@ async function onClick(e) {
 
 // Briefly swaps the icon to a checkmark (or keeps the copy icon on failure)
 // and updates the tooltip, then restores the original state.
-function flash(btn, ok) {
+function flash(btn, ok, message) {
   btn.innerHTML = ok ? CHECK_ICON : COPY_ICON;
+  btn.title = message || (ok ? "Copied!" : "Copy failed");
   clearTimeout(btn._flashTimer);
   btn._flashTimer = setTimeout(() => {
     btn.innerHTML = COPY_ICON;
